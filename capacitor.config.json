@@ -1,0 +1,17 @@
+{
+  "appId": "com.xun555.multitimer",
+  "appName": "多计时器",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#1a1a2e"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher",
+      "iconColor": "#6c5ce7",
+      "sound": "default"
+    }
+  }
+}

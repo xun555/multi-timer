@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">多计时器</string>
+    <string name="title_activity_main">多计时器</string>
+    <string name="package_name">com.xun555.multitimer</string>
+    <string name="custom_url_scheme">com.xun555.multitimer</string>
+</resources>

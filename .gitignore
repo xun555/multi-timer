@@ -1,0 +1,44 @@
+# Node
+node_modules/
+npm-debug.log*
+package-lock.json
+
+# Build outputs
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+*.log
+tunnel*.txt
+start-tunnel.ps1
+quick-tunnel.ps1
+call-pwabuilder-api.ps1
+gen-icons.*
+multi-timer-deploy.zip
+.trae-html-share-packages/
+
+# 根目录的旧 web 文件（已迁移到 www/，本地保留作备份）
+/index.html
+/styles.css
+/app.js
+/manifest.json
+/service-worker.js
+/icon-192.png
+/icon-512.png
+/vercel.json
+
+# Netlify 部署副本（本地用）
+/deploy/

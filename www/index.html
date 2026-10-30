@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#4F46E5" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="多计时器" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/png" href="./icon-192.png" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="./icon-192.png" />
+  <title>多计时器 · Timer</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- =================== 顶部标题栏 =================== -->
+  <header class="app-header">
+    <div class="header-inner">
+      <h1 class="app-title">⏱️ 多计时器</h1>
+      <span class="app-subtitle" id="taskCount">0 个运行中</span>
+    </div>
+  </header>
+
+  <!-- =================== 计时器列表 =================== -->
+  <main class="timer-list" id="timerList">
+    <!-- 空状态 -->
+    <div class="empty-state" id="emptyState">
+      <div class="empty-icon">📭</div>
+      <div class="empty-text">还没有计时事项</div>
+      <div class="empty-hint">点击下方 + 按钮新建一个吧</div>
+    </div>
+  </main>
+
+  <!-- =================== 新建按钮（浮动） =================== -->
+  <button class="fab" id="addBtn" aria-label="新建计时">
+    <span class="fab-icon">+</span>
+  </button>
+
+  <!-- =================== 新建事项弹窗 =================== -->
+  <div class="modal" id="addModal">
+    <div class="modal-backdrop"></div>
+    <div class="modal-sheet">
+      <div class="modal-handle"></div>
+      <h2 class="modal-title">新建计时事项</h2>
+
+      <div class="form-group">
+        <label class="form-label">事项名称</label>
+        <input type="text" class="form-input" id="taskName" placeholder="例如：煮咖啡、学习、跑步..." maxlength="20" />
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">计时模式</label>
+        <div class="mode-switch">
+          <button class="mode-btn active" data-mode="reverse" type="button">
+            <span class="mode-icon">⏳</span>
+            <span class="mode-text">倒计时</span>
+            <span class="mode-desc">反向计时</span>
+          </button>
+          <button class="mode-btn" data-mode="forward" type="button">
+            <span class="mode-icon">⏱️</span>
+            <span class="mode-text">正计时</span>
+            <span class="mode-desc">累计时长</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 倒计时模式下显示时间输入 -->
+      <div class="form-group" id="timeInputGroup">
+        <label class="form-label">设置时间</label>
+        <div class="time-inputs">
+          <div class="time-input-item">
+            <input type="number" class="time-input" id="inputHours" min="0" max="99" value="0" />
+            <span class="time-unit">时</span>
+          </div>
+          <span class="time-sep">:</span>
+          <div class="time-input-item">
+            <input type="number" class="time-input" id="inputMinutes" min="0" max="59" value="5" />
+            <span class="time-unit">分</span>
+          </div>
+          <span class="time-sep">:</span>
+          <div class="time-input-item">
+            <input type="number" class="time-input" id="inputSeconds" min="0" max="59" value="0" />
+            <span class="time-unit">秒</span>
+          </div>
+        </div>
+        <div class="quick-picks">
+          <button type="button" class="quick-btn" data-s="60">1分钟</button>
+          <button type="button" class="quick-btn" data-s="300">5分钟</button>
+          <button type="button" class="quick-btn" data-s="600">10分钟</button>
+          <button type="button" class="quick-btn" data-s="1500">25分钟</button>
+          <button type="button" class="quick-btn" data-s="3600">1小时</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="soundGroup">
+        <label class="form-label">提示音</label>
+        <div class="sound-options">
+          <label class="sound-option">
+            <input type="radio" name="sound" value="beep" checked />
+            <span class="sound-name">滴滴声</span>
+          </label>
+          <label class="sound-option">
+            <input type="radio" name="sound" value="alarm" />
+            <span class="sound-name">闹钟声</span>
+          </label>
+          <label class="sound-option">
+            <input type="radio" name="sound" value="bell" />
+            <span class="sound-name">铃声</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancelBtn" type="button">取消</button>
+        <button class="btn btn-primary" id="confirmBtn" type="button">创建并开始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- =================== 提示（Toast） =================== -->
+  <div class="toast" id="toast"></div>
+
+  <!-- =================== 声音提示层（页面不可见时也能播放） =================== -->
+  <audio id="audioContext" preload="auto"></audio>
+
+  <script src="app.js"></script>
+</body>
+</html>
