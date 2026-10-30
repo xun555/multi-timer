@@ -1,7 +1,7 @@
 # Node
 node_modules/
 npm-debug.log*
-package-lock.json
+# package-lock.json 需要保留，用于 GitHub Actions 的 npm 缓存和版本锁定
 
 # Build outputs
 android/app/build/
