@@ -217,6 +217,13 @@ function loadFromStorage() {
         if (t.mode === "forward" && typeof t.elapsed !== "number") {
           t.elapsed = 0;
         }
+        // 上次会话遗留的响铃状态：重新打开时不再响铃，倒计时恢复原时间
+        if (t.alarming) {
+          t.alarming = false;
+          if (t.mode === "reverse" && t.status === "ended") {
+            t.remaining = t.totalSeconds || 0;
+          }
+        }
       });
     }
   } catch (e) {
@@ -358,6 +365,7 @@ function tick(task) {
 
 /** 倒计时结束回调 */
 function onTaskEnded(task) {
+  task.alarming = true;
   SoundEngine.playEndSound(task.soundType || "beep");
   showNotificationBanner(task.name + " 时间到！");
   showToast("✅ " + task.name + " 已结束");
@@ -365,9 +373,57 @@ function onTaskEnded(task) {
   // 尝试系统通知（需要权限）
   trySendNotification(task);
 
+  renderTask(task); // 立即渲染为红色警示
+  focusTaskCard(task); // 自动定位到该计时项
+
   saveToStorage();
   updateHeaderCount();
   WakeLock.sync();
+}
+
+/** 把指定任务的卡片滚动到可视区域中央（必要时切回计时页） */
+function focusTaskCard(task) {
+  // 如果当前停留在游戏次数页，先切回计时页
+  if (Pages.current() !== 0) {
+    Pages.go(0);
+    // 等页面切换动画后再滚动
+    setTimeout(() => scrollCardIntoView(task), 320);
+  } else {
+    scrollCardIntoView(task);
+  }
+}
+
+function scrollCardIntoView(task) {
+  const card = document.querySelector(`.timer-card[data-id="${task.id}"]`);
+  if (!card) return;
+  const list = $("#timerList");
+  if (!list) return;
+
+  const listRect = list.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const fullyVisible = cardRect.top >= listRect.top && cardRect.bottom <= listRect.bottom;
+  if (fullyVisible) return;
+
+  card.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+/** 停止响铃：关闭声音与横幅，并让已结束的倒计时恢复显示原始设定时间 */
+function stopAlarm() {
+  SoundEngine.stopEndSound();
+  const banner = $(".notification-banner");
+  if (banner) banner.classList.remove("show");
+
+  tasks.forEach((t) => {
+    if (t.alarming) {
+      t.alarming = false;
+      if (t.mode === "reverse" && t.status === "ended") {
+        // 恢复到原倒计时时间
+        t.remaining = t.totalSeconds;
+      }
+      renderTask(t);
+    }
+  });
+  saveToStorage();
 }
 
 function showNotificationBanner(text) {
@@ -376,19 +432,16 @@ function showNotificationBanner(text) {
     banner = document.createElement("div");
     banner.className = "notification-banner";
     banner.innerHTML = `
-      <span class="nb-icon">🎉</span>
+      <span class="nb-icon">⏰</span>
       <span class="nb-text"></span>
-      <button class="nb-close" type="button">停止响铃</button>
+      <button class="nb-bell" type="button" aria-label="停止响铃">🔔</button>
     `;
-    banner.querySelector(".nb-close").addEventListener("click", () => {
-      SoundEngine.stopEndSound();
-      banner.classList.remove("show");
-    });
+    banner.querySelector(".nb-bell").addEventListener("click", stopAlarm);
     document.body.appendChild(banner);
   }
   banner.querySelector(".nb-text").textContent = text;
   banner.classList.add("show");
-  // 不再自动停止，用户必须手动点"停止响铃"或操作计时器才会停
+  // 不自动停止，用户点铃铛（或操作计时器）才停
 }
 
 function trySendNotification(task) {
@@ -502,8 +555,9 @@ function endTask(taskId) {
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
   task.status = "ended";
+  task.alarming = false;
   stopLoop(task.id);
-  SoundEngine.stopEndSound();
+  stopAlarm();
   // 结束时正计时归零，倒计时恢复显示原设定时间
   if (task.mode === "reverse") {
     task.remaining = task.totalSeconds;
@@ -523,7 +577,8 @@ function restartTask(taskId) {
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
   stopLoop(task.id);
-  SoundEngine.stopEndSound();
+  task.alarming = false;
+  stopAlarm();
   NativeTimer.cancel(task); // 取消旧通知
   task._pausedAccum = 0;
   task.startedAt = Date.now();
@@ -644,9 +699,10 @@ function renderTask(task) {
   if (!card) return;
 
   // 状态 class
-  card.classList.remove("active", "ended", "urgent");
+  card.classList.remove("active", "ended", "urgent", "alarm");
   if (task.status === "running") card.classList.add("active");
   if (task.status === "ended") card.classList.add("ended");
+  if (task.alarming) card.classList.add("alarm");
 
   // 紧急提醒
   if (task.mode === "reverse" && task.status === "running" && task.remaining < 10 && task.remaining > 0) {
@@ -922,6 +978,259 @@ function syncTaskOrderFromDOM() {
   }
 }
 
+// ========== 横向页面切换（滑轨 + 手势） ==========
+const Pages = (() => {
+  const wrap = $("#pages");
+  const track = $("#pagesTrack");
+  const tabs = $$(".page-tab");
+  const MAX = 1; // 共两页
+  let currentIndex = 0;
+
+  // 手势状态
+  let startX = 0;
+  let startY = 0;
+  let offsetX = 0;
+  let tracking = false;
+  let horizontal = false;
+
+  function syncUI(idx) {
+    tabs.forEach((t) => t.classList.toggle("active", Number(t.dataset.page) === idx));
+    const fab = $("#addBtn");
+    if (fab) fab.style.display = idx === 0 ? "" : "none";
+  }
+
+  function apply(px, animated) {
+    if (!track) return;
+    track.style.transition = animated ? "" : "none";
+    track.style.transform = `translateX(calc(${-currentIndex * 100}% + ${px}px))`;
+  }
+
+  function go(idx, animated = true) {
+    currentIndex = Math.max(0, Math.min(MAX, idx));
+    offsetX = 0;
+    apply(0, animated);
+    syncUI(currentIndex);
+  }
+
+  function onTouchStart(e) {
+    if (e.touches.length !== 1) return;
+    // 正在拖动排序卡片时不响应翻页
+    if (document.querySelector(".timer-card.dragging")) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    offsetX = 0;
+    tracking = true;
+    horizontal = false;
+  }
+
+  function onTouchMove(e) {
+    if (!tracking || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+
+    if (!horizontal) {
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > 12) {
+        horizontal = true;
+      } else if (Math.abs(dy) > 12) {
+        // 判定为纵向滚动，放弃翻页
+        tracking = false;
+        return;
+      } else {
+        return;
+      }
+    }
+
+    // 边界阻尼
+    let px = dx;
+    if ((currentIndex === 0 && dx > 0) || (currentIndex === MAX && dx < 0)) px *= 0.32;
+    offsetX = px;
+    apply(px, false);
+  }
+
+  function onTouchEnd() {
+    if (!tracking) {
+      horizontal = false;
+      return;
+    }
+    if (horizontal) {
+      const threshold = (wrap.clientWidth || 320) * 0.22;
+      if (offsetX < -threshold) go(currentIndex + 1);
+      else if (offsetX > threshold) go(currentIndex - 1);
+      else go(currentIndex);
+    }
+    tracking = false;
+    horizontal = false;
+  }
+
+  function bind() {
+    tabs.forEach((t) => t.addEventListener("click", () => go(Number(t.dataset.page))));
+    wrap.addEventListener("touchstart", onTouchStart, { passive: true });
+    wrap.addEventListener("touchmove", onTouchMove, { passive: true });
+    wrap.addEventListener("touchend", onTouchEnd);
+    wrap.addEventListener("touchcancel", onTouchEnd);
+    go(0, false);
+  }
+
+  return { bind, go, current: () => currentIndex };
+})();
+
+// ========== 王者荣耀游戏次数计算 ==========
+const GameCalc = (() => {
+  const KEY = "multi_timer_game_v1";
+  const DEFAULTS = [
+    { name: "学习时间", d1: 2, d2: 20 },
+    { name: "获取信息时间", d1: 3, d2: 20 },
+    { name: "健身锻炼时间", d1: 2, d2: 25 },
+  ];
+
+  let items = [];
+
+  function uid() {
+    return "g_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) {
+        items = JSON.parse(raw);
+      }
+    } catch (e) {
+      items = [];
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      items = DEFAULTS.map((d) => ({ id: uid(), name: d.name, d1: d.d1, d2: d.d2, minutes: 0 }));
+    }
+    items.forEach((it) => {
+      if (typeof it.minutes !== "number") it.minutes = 0;
+      if (typeof it.d1 !== "number") it.d1 = 1;
+      if (typeof it.d2 !== "number") it.d2 = 1;
+    });
+  }
+
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify(items));
+    } catch (e) {}
+  }
+
+  /** 单项贡献次数 */
+  function itemValue(it) {
+    const d1 = it.d1 > 0 ? it.d1 : 0;
+    const d2 = it.d2 > 0 ? it.d2 : 0;
+    if (!d1 || !d2) return 0;
+    return it.minutes / d1 / d2;
+  }
+
+  function total() {
+    return items.reduce((sum, it) => sum + itemValue(it), 0);
+  }
+
+  function fmt(n) {
+    return n.toFixed(2);
+  }
+
+  function refreshTotals() {
+    const totalEl = $("#gameTotal");
+    if (totalEl) totalEl.textContent = fmt(total());
+    $$(".game-item").forEach((el) => {
+      const it = items.find((x) => x.id === el.dataset.id);
+      if (!it) return;
+      const res = el.querySelector(".game-item-result b");
+      if (res) res.textContent = fmt(itemValue(it));
+    });
+  }
+
+  function buildItem(it) {
+    const el = document.createElement("div");
+    el.className = "game-item";
+    el.dataset.id = it.id;
+    el.innerHTML = `
+      <div class="game-item-head">
+        <input class="game-item-name" type="text" maxlength="12" />
+        <button class="game-item-del" type="button" aria-label="删除">✕</button>
+      </div>
+      <div class="game-item-body">
+        <div class="game-field">
+          <span>时间</span>
+          <input class="game-num minutes" type="number" min="0" step="1" />
+          <span>分钟</span>
+        </div>
+        <div class="game-field">
+          <span>÷</span>
+          <input class="game-num divisor d1" type="number" min="0" step="0.1" />
+        </div>
+        <div class="game-field">
+          <span>÷</span>
+          <input class="game-num divisor d2" type="number" min="0" step="0.1" />
+        </div>
+      </div>
+      <div class="game-item-result">本项目 = <b>0.00</b> 次</div>
+    `;
+
+    const nameEl = el.querySelector(".game-item-name");
+    const minutesEl = el.querySelector(".minutes");
+    const d1El = el.querySelector(".d1");
+    const d2El = el.querySelector(".d2");
+
+    nameEl.value = it.name;
+    minutesEl.value = it.minutes;
+    d1El.value = it.d1;
+    d2El.value = it.d2;
+
+    nameEl.addEventListener("input", () => {
+      it.name = nameEl.value;
+      save();
+    });
+
+    minutesEl.addEventListener("input", () => {
+      it.minutes = parseFloat(minutesEl.value) || 0;
+      save();
+      refreshTotals();
+    });
+
+    [d1El, d2El].forEach((input) => {
+      input.addEventListener("input", () => {
+        it.d1 = parseFloat(d1El.value) || 0;
+        it.d2 = parseFloat(d2El.value) || 0;
+        save();
+        refreshTotals();
+      });
+    });
+
+    el.querySelector(".game-item-del").addEventListener("click", () => {
+      items = items.filter((x) => x.id !== it.id);
+      save();
+      renderAll();
+    });
+
+    return el;
+  }
+
+  function renderAll() {
+    const box = $("#gameItems");
+    if (!box) return;
+    box.innerHTML = "";
+    items.forEach((it) => box.appendChild(buildItem(it)));
+    refreshTotals();
+  }
+
+  function addItem() {
+    items.push({ id: uid(), name: "新时间项目", d1: 2, d2: 20, minutes: 0 });
+    save();
+    renderAll();
+  }
+
+  function init() {
+    load();
+    renderAll();
+    const btn = $("#gameAddBtn");
+    if (btn) btn.addEventListener("click", addItem);
+  }
+
+  return { init };
+})();
+
 // ========== 恢复运行中的计时器 ==========
 function resumeRunningTasks() {
   tasks.forEach((t) => {
@@ -946,6 +1255,8 @@ function init() {
   renderList();
   updateHeaderCount();
   initDragSort();
+  Pages.bind();
+  GameCalc.init();
   // 原生环境：初始化通知（申请权限 + 建渠道）
   NativeTimer.init().then(() => {
     resumeRunningTasks();

@@ -22,17 +22,48 @@
       <h1 class="app-title">⏱️ 多计时器</h1>
       <span class="app-subtitle" id="taskCount">0 个运行中</span>
     </div>
+    <div class="page-tabs" id="pageTabs">
+      <button class="page-tab active" data-page="0" type="button">⏱️ 计时</button>
+      <button class="page-tab" data-page="1" type="button">🎮 游戏次数</button>
+    </div>
   </header>
 
-  <!-- =================== 计时器列表 =================== -->
-  <main class="timer-list" id="timerList">
-    <!-- 空状态 -->
-    <div class="empty-state" id="emptyState">
-      <div class="empty-icon">📭</div>
-      <div class="empty-text">还没有计时事项</div>
-      <div class="empty-hint">点击下方 + 按钮新建一个吧</div>
+  <!-- =================== 横向双页面 =================== -->
+  <div class="pages" id="pages">
+    <div class="pages-track" id="pagesTrack">
+      <!-- 第 1 页：计时器列表 -->
+      <section class="page">
+        <main class="timer-list" id="timerList">
+          <!-- 空状态 -->
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon">📭</div>
+            <div class="empty-text">还没有计时事项</div>
+            <div class="empty-hint">点击下方 + 按钮新建一个吧</div>
+          </div>
+        </main>
+      </section>
+
+      <!-- 第 2 页：王者荣耀游戏次数计算 -->
+      <section class="page">
+        <div class="game-panel">
+          <div class="game-total-card">
+            <div class="game-total-label">今日可玩王者次数</div>
+            <div class="game-total-row">
+              <span class="game-total-value" id="gameTotal">0.00</span>
+              <span class="game-total-unit">次</span>
+            </div>
+          </div>
+
+          <div class="game-items" id="gameItems"></div>
+
+          <button class="game-add-btn" id="gameAddBtn" type="button">+ 添加时间项目</button>
+          <div class="game-hint">
+            次数 = 各项目时间 ÷ 比例1 ÷ 比例2 之和，时间单位：分钟
+          </div>
+        </div>
+      </section>
     </div>
-  </main>
+  </div>
 
   <!-- =================== 新建按钮（浮动） =================== -->
   <button class="fab" id="addBtn" aria-label="新建计时">
