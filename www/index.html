@@ -44,7 +44,7 @@
     <div class="modal-backdrop"></div>
     <div class="modal-sheet">
       <div class="modal-handle"></div>
-      <h2 class="modal-title">新建计时事项</h2>
+      <h2 class="modal-title" id="modalTitle">新建计时事项</h2>
 
       <div class="form-group">
         <label class="form-label">事项名称</label>
@@ -77,7 +77,7 @@
           </div>
           <span class="time-sep">:</span>
           <div class="time-input-item">
-            <input type="number" class="time-input" id="inputMinutes" min="0" max="59" value="5" />
+            <input type="number" class="time-input" id="inputMinutes" min="0" max="59" value="0" />
             <span class="time-unit">分</span>
           </div>
           <span class="time-sep">:</span>
@@ -115,7 +115,7 @@
 
       <div class="modal-actions">
         <button class="btn btn-ghost" id="cancelBtn" type="button">取消</button>
-        <button class="btn btn-primary" id="confirmBtn" type="button">创建并开始</button>
+        <button class="btn btn-primary" id="confirmBtn" type="button">创建</button>
       </div>
     </div>
   </div>

@@ -255,6 +255,43 @@ button {
   color: var(--danger);
 }
 
+.card-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.card-edit {
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.card-edit:hover,
+.card-edit:active {
+  background: var(--surface-hover);
+  color: var(--primary);
+}
+
+/* 拖拽排序 */
+.timer-card.dragging {
+  opacity: 0.9;
+  transform: scale(1.02);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  z-index: 100;
+  border-color: var(--primary);
+}
+
 /* 时间显示 */
 .card-time {
   font-family: "SF Mono", "Monaco", "Menlo", "Consolas", monospace;

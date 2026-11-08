@@ -378,7 +378,7 @@ function showNotificationBanner(text) {
     banner.innerHTML = `
       <span class="nb-icon">🎉</span>
       <span class="nb-text"></span>
-      <button class="nb-close" type="button">✕</button>
+      <button class="nb-close" type="button">停止响铃</button>
     `;
     banner.querySelector(".nb-close").addEventListener("click", () => {
       SoundEngine.stopEndSound();
@@ -388,11 +388,7 @@ function showNotificationBanner(text) {
   }
   banner.querySelector(".nb-text").textContent = text;
   banner.classList.add("show");
-  clearTimeout(showNotificationBanner._t);
-  showNotificationBanner._t = setTimeout(() => {
-    banner.classList.remove("show");
-    SoundEngine.stopEndSound();
-  }, 12000);
+  // 不再自动停止，用户必须手动点"停止响铃"或操作计时器才会停
 }
 
 function trySendNotification(task) {
@@ -426,8 +422,7 @@ function createTask(data) {
   saveToStorage();
   renderList();
 
-  // 自动开始
-  startTask(task.id);
+  // 不自动开始，保持 idle 状态，由用户手动点"开始"
 
   // 请求通知权限（异步）
   if ("Notification" in window && Notification.permission === "default") {
@@ -508,17 +503,14 @@ function endTask(taskId) {
   if (!task) return;
   task.status = "ended";
   stopLoop(task.id);
-  // 结算最后一次 tick
+  SoundEngine.stopEndSound();
+  // 结束时正计时归零，倒计时恢复显示原设定时间
   if (task.mode === "reverse") {
-    // 结束按钮是"手动结束"，不是自然结束，不触发声音
-    const delta = (Date.now() - task.startedAt) / 1000;
-    task._pausedAccum = (task._pausedAccum || 0) + delta;
-    task.remaining = Math.max(0, task.totalSeconds - task._pausedAccum);
+    task.remaining = task.totalSeconds;
   } else {
-    const delta = (Date.now() - task.startedAt) / 1000;
-    task._pausedAccum = (task._pausedAccum || 0) + delta;
-    task.elapsed = task._pausedAccum;
+    task.elapsed = 0;
   }
+  task._pausedAccum = 0;
   renderTask(task);
   saveToStorage();
   updateHeaderCount();
@@ -531,6 +523,7 @@ function restartTask(taskId) {
   const task = tasks.find((t) => t.id === taskId);
   if (!task) return;
   stopLoop(task.id);
+  SoundEngine.stopEndSound();
   NativeTimer.cancel(task); // 取消旧通知
   task._pausedAccum = 0;
   task.startedAt = Date.now();
@@ -564,6 +557,30 @@ function deleteTask(taskId) {
   showToast("已删除 " + name);
 }
 
+/** 编辑任务（名称/模式/总时长/声音） */
+function updateTask(taskId, data) {
+  const task = tasks.find((t) => t.id === taskId);
+  if (!task) return;
+  task.name = data.name || task.name;
+  task.soundType = data.soundType || task.soundType;
+  // 模式或总时长变了 → 重置进度，回到 idle
+  if (data.mode !== task.mode || data.totalSeconds !== task.totalSeconds) {
+    NativeTimer.cancel(task);
+    stopLoop(task.id);
+    task.mode = data.mode;
+    task.totalSeconds = data.totalSeconds || 0;
+    task.remaining = data.totalSeconds || 0;
+    task.elapsed = 0;
+    task._pausedAccum = 0;
+    task.status = "idle";
+    task.startedAt = 0;
+  }
+  renderTask(task);
+  saveToStorage();
+  updateHeaderCount();
+  WakeLock.sync();
+}
+
 // ========== 渲染 ==========
 
 function renderList() {
@@ -594,7 +611,10 @@ function buildCard(task) {
         <div class="card-title"></div>
         <span class="card-mode-tag">${task.mode === "reverse" ? "倒计时" : "正计时"}</span>
       </div>
-      <button class="card-delete" data-act="delete" type="button" aria-label="删除">🗑️</button>
+      <div class="card-tools">
+        <button class="card-edit" data-act="edit" type="button" aria-label="编辑">✏️</button>
+        <button class="card-delete" data-act="delete" type="button" aria-label="删除">🗑️</button>
+      </div>
     </div>
     <div class="card-time">--:--</div>
     <div class="card-progress">
@@ -604,7 +624,11 @@ function buildCard(task) {
   `;
   card.querySelector(".card-title").textContent = task.name;
 
-  // 绑定事件
+  card.querySelector("[data-act=edit]").addEventListener("click", (e) => {
+    e.stopPropagation();
+    AddModal.open(task);
+  });
+
   card.querySelector("[data-act=delete]").addEventListener("click", (e) => {
     e.stopPropagation();
     if (confirm(`确定删除「${task.name}」？`)) {
@@ -694,64 +718,83 @@ function updateHeaderCount() {
   }
 }
 
-// ========== 新建弹窗 ==========
+// ========== 新建/编辑弹窗 ==========
 const AddModal = (() => {
   const modal = $("#addModal");
   const nameInput = $("#taskName");
   const modeBtns = $$(".mode-btn");
   const timeGroup = $("#timeInputGroup");
+  const soundGroup = $("#soundGroup");
   const h = $("#inputHours");
   const m = $("#inputMinutes");
   const s = $("#inputSeconds");
+  const titleEl = $("#modalTitle");
+  const confirmBtn = $("#confirmBtn");
 
   let currentMode = "reverse";
+  let editingTaskId = null; // null = 新建模式
 
-  function open() {
-    // 重置表单
-    nameInput.value = "";
-    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === "reverse"));
-    currentMode = "reverse";
-    h.value = 0;
-    m.value = 5;
-    s.value = 0;
-    h.disabled = m.disabled = s.disabled = false;
-    timeGroup.style.display = "";
+  function applyModeUI() {
+    modeBtns.forEach((b) => b.classList.toggle("active", b.dataset.mode === currentMode));
+    if (currentMode === "forward") {
+      timeGroup.style.display = "none";
+      soundGroup.style.display = "none"; // 正计时不需要提示音
+    } else {
+      timeGroup.style.display = "";
+      soundGroup.style.display = "";
+    }
+  }
 
-    // 默认选中第一个声音
-    const defaultSound = document.querySelector('input[name="sound"][value="beep"]');
-    if (defaultSound) defaultSound.checked = true;
+  function open(task) {
+    editingTaskId = task ? task.id : null;
+    titleEl.textContent = task ? "编辑计时事项" : "新建计时事项";
+    confirmBtn.textContent = task ? "保存" : "创建";
 
+    if (task) {
+      // 编辑模式：回填数据
+      nameInput.value = task.name;
+      currentMode = task.mode;
+      h.value = Math.floor(task.totalSeconds / 3600);
+      m.value = Math.floor((task.totalSeconds % 3600) / 60);
+      s.value = task.totalSeconds % 60;
+      const radio = document.querySelector(`input[name="sound"][value="${task.soundType || "beep"}"]`);
+      if (radio) radio.checked = true;
+    } else {
+      // 新建模式：默认值
+      nameInput.value = "";
+      currentMode = "reverse";
+      h.value = 0;
+      m.value = 0;
+      s.value = 0;
+      const defaultSound = document.querySelector('input[name="sound"][value="beep"]');
+      if (defaultSound) defaultSound.checked = true;
+    }
+
+    applyModeUI();
     modal.classList.add("open");
     setTimeout(() => nameInput.focus(), 200);
   }
 
   function close() {
     modal.classList.remove("open");
+    editingTaskId = null;
   }
 
   function bind() {
     $("#addBtn").addEventListener("click", () => {
-      SoundEngine.ensureCtx(); // iOS 需要
-      open();
+      SoundEngine.ensureCtx();
+      open(null);
     });
     $("#cancelBtn").addEventListener("click", close);
     $(".modal-backdrop").addEventListener("click", close);
 
-    // 模式切换
     modeBtns.forEach((btn) => {
       btn.addEventListener("click", () => {
-        modeBtns.forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
         currentMode = btn.dataset.mode;
-        if (currentMode === "forward") {
-          timeGroup.style.display = "none";
-        } else {
-          timeGroup.style.display = "";
-        }
+        applyModeUI();
       });
     });
 
-    // 快捷时长
     $$(".quick-btn").forEach((q) => {
       q.addEventListener("click", () => {
         const total = parseInt(q.dataset.s, 10);
@@ -761,8 +804,7 @@ const AddModal = (() => {
       });
     });
 
-    // 确认按钮
-    $("#confirmBtn").addEventListener("click", () => {
+    confirmBtn.addEventListener("click", () => {
       const name = nameInput.value.trim() || (currentMode === "forward" ? "正计时" : "倒计时");
       let totalSeconds = 0;
       if (currentMode === "reverse") {
@@ -776,24 +818,109 @@ const AddModal = (() => {
         }
       }
       const sound = document.querySelector('input[name="sound"]:checked');
-      createTask({
-        name,
-        mode: currentMode,
-        totalSeconds,
-        soundType: sound ? sound.value : "beep",
-      });
+      const soundType = sound ? sound.value : "beep";
+
+      if (editingTaskId) {
+        updateTask(editingTaskId, { name, mode: currentMode, totalSeconds, soundType });
+        showToast("✅ 已保存修改");
+      } else {
+        createTask({ name, mode: currentMode, totalSeconds, soundType });
+        showToast("✅ 已创建");
+      }
       close();
-      showToast("✅ 已创建并开始");
     });
 
-    // Enter 提交
     nameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") $("#confirmBtn").click();
+      if (e.key === "Enter") confirmBtn.click();
     });
   }
 
-  return { bind };
+  return { bind, open };
 })();
+
+// ========== 长按拖动排序 ==========
+function initDragSort() {
+  const list = $("#timerList");
+  if (!list) return;
+
+  let dragging = null;
+  let startY = 0;
+  let longPressTimer = null;
+  let isDragging = false;
+
+  list.addEventListener(
+    "touchstart",
+    (e) => {
+      const card = e.target.closest(".timer-card");
+      if (!card) return;
+      // 不要在按钮上触发拖动
+      if (e.target.closest("button")) return;
+
+      dragging = card;
+      startY = e.touches[0].clientY;
+      isDragging = false;
+
+      longPressTimer = setTimeout(() => {
+        isDragging = true;
+        card.classList.add("dragging");
+        if (navigator.vibrate) navigator.vibrate(30);
+      }, 400);
+    },
+    { passive: true }
+  );
+
+  list.addEventListener(
+    "touchmove",
+    (e) => {
+      if (!dragging) return;
+      if (!isDragging) {
+        if (Math.abs(e.touches[0].clientY - startY) > 10) {
+          clearTimeout(longPressTimer);
+        }
+        return;
+      }
+      e.preventDefault();
+
+      const touchY = e.touches[0].clientY;
+      const cards = Array.from(list.querySelectorAll(".timer-card"));
+      let insertBefore = null;
+      for (const c of cards) {
+        if (c === dragging) continue;
+        const rect = c.getBoundingClientRect();
+        if (touchY < rect.top + rect.height / 2) {
+          insertBefore = c;
+          break;
+        }
+      }
+      if (insertBefore) list.insertBefore(dragging, insertBefore);
+      else list.appendChild(dragging);
+    },
+    { passive: false }
+  );
+
+  const endDrag = () => {
+    clearTimeout(longPressTimer);
+    if (dragging && isDragging) {
+      dragging.classList.remove("dragging");
+      syncTaskOrderFromDOM();
+    }
+    dragging = null;
+    isDragging = false;
+  };
+  list.addEventListener("touchend", endDrag);
+  list.addEventListener("touchcancel", endDrag);
+}
+
+function syncTaskOrderFromDOM() {
+  const cards = $$(".timer-card");
+  const newOrder = cards
+    .map((c) => tasks.find((t) => t.id === c.dataset.id))
+    .filter(Boolean);
+  if (newOrder.length === tasks.length && newOrder.length > 0) {
+    tasks = newOrder;
+    saveToStorage();
+  }
+}
 
 // ========== 恢复运行中的计时器 ==========
 function resumeRunningTasks() {
@@ -818,6 +945,7 @@ function init() {
   AddModal.bind();
   renderList();
   updateHeaderCount();
+  initDragSort();
   // 原生环境：初始化通知（申请权限 + 建渠道）
   NativeTimer.init().then(() => {
     resumeRunningTasks();
